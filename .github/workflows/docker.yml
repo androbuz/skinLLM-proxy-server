@@ -6,8 +6,7 @@ on:
       - main
 
 env:
-  IMAGE_NAME: poultry-proxy-server
-
+  IMAGE_NAME: skin-llm-proxy-server
 jobs:
   docker:
     runs-on: ubuntu-latest
