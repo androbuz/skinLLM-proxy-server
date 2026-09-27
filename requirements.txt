@@ -1,0 +1,4 @@
+
+Flask
+gunicorn
+gradio_client
