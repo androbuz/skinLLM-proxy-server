@@ -2,12 +2,14 @@ import os
 import json
 import time
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 from gradio_client import Client
 import boto3
 from botocore.config import Config
 from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
+CORS(app)
 
 # Existing Hugging Face Space configuration
 HF_SPACE = os.environ.get("HF_SPACE")
