@@ -2,3 +2,5 @@
 Flask
 gunicorn
 gradio_client
+
+boto3
