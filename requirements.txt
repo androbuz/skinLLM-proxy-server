@@ -6,3 +6,5 @@ gradio_client
 boto3
 
 flask-cors
+
+requests
