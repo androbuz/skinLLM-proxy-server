@@ -162,6 +162,51 @@ def clean_response(text):
         text = text.replace(block, "")
     return text.strip()
 
+
+@app.route("/predict_visual", methods=["POST"])
+def predict_visual():
+    if not client:
+        return jsonify({"success": False, "error": "HF Client not initialized"}), 500
+    try:
+        if 'file' not in request.files:
+            return jsonify({"success": False, "error": "No file part in the request"}), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({"success": False, "error": "No selected file"}), 400
+
+        description = request.form.get('description', '')
+
+        # Secure filename and save locally inside a temporary path
+        filename = secure_filename(file.filename)
+        temp_dir = "/tmp"
+        os.makedirs(temp_dir, exist_ok=True)
+        temp_path = os.path.join(temp_dir, filename)
+        file.save(temp_path)
+
+        # Call Hugging Face Space visual predict API endpoint
+        # Gradio spaces often take (image_path, text_description) or similar depending on the space signature.
+        # Since the original space is called with /predict, we will forward to it.
+        result = client.predict(temp_path, description, api_name="/predict")
+
+        # Clean up local file
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+        # The result from Gradio usually matches the format expected by the app
+        if isinstance(result, str):
+            try:
+                result_dict = json.loads(result)
+                return jsonify(result_dict)
+            except Exception:
+                return jsonify({"result": result})
+        
+        return jsonify(result)
+
+    except Exception as e:
+        print(f"Visual prediction error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
