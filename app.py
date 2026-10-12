@@ -13,11 +13,13 @@ app = Flask(__name__)
 HF_SPACE = os.environ.get("HF_SPACE")
 HF_TOKEN = os.environ.get("HF_TOKEN")
 
-# Backblaze B2 configuration
+# Backblaze B2 credentials (kept secret as environment variables)
 B2_KEY_ID = os.environ.get("B2_KEY_ID")
 B2_APPLICATION_KEY = os.environ.get("B2_APPLICATION_KEY")
-B2_BUCKET_NAME = os.environ.get("B2_BUCKET_NAME")
-B2_ENDPOINT_URL = os.environ.get("B2_ENDPOINT_URL")
+
+# Static Backblaze B2 details directly inside the code
+B2_BUCKET_NAME = "Derma-ai"
+B2_ENDPOINT_URL = "https://s3.eu-central-003.backblazeb2.com"
 
 # Initialize Gradio client if HF credentials are provided
 client = None
@@ -26,7 +28,7 @@ if HF_SPACE and HF_TOKEN:
 
 # Initialize B2 S3 Client if credentials are provided
 s3_client = None
-if B2_KEY_ID and B2_APPLICATION_KEY and B2_ENDPOINT_URL:
+if B2_KEY_ID and B2_APPLICATION_KEY:
     s3_client = boto3.client(
         's3',
         endpoint_url=B2_ENDPOINT_URL,
