@@ -73,10 +73,9 @@ def predict():
 
 @app.route("/crowdsource", methods=["POST"])
 def crowdsource():
-    # New crowdsourcing endpoint:
-    # - Intercepts visual image file upload
-    # - Saves to B2 bucket in 'images/'
-    # - Appends/registers label metadata inside B2
+    # Intercepts visual image file upload
+    # Saves to B2 bucket in 'images/'
+    # Appends/registers label metadata inside B2
     if not s3_client:
         return jsonify({
             "success": False,
@@ -89,6 +88,8 @@ def crowdsource():
 
         file = request.files['file']
         label = request.form.get('label', 'unlabeled').strip()
+        description = request.form.get('description', 'undescribed').strip()
+        treatment = request.form.get('treatment', 'untreated').strip()
 
         if file.filename == '':
             return jsonify({"success": False, "error": "No selected file"}), 400
@@ -98,7 +99,7 @@ def crowdsource():
         safe_file_name = secure_filename(file.filename)
         b2_filename = f"images/{timestamp}_{safe_file_name}"
 
-        # 1. Upload the image directly to B2
+        # Upload the image directly to B2
         file_stream = file.stream
         s3_client.upload_fileobj(
             file_stream,
@@ -107,7 +108,7 @@ def crowdsource():
             ExtraArgs={'ContentType': file.content_type or 'image/jpeg'}
         )
 
-        # 2. Update metadata.json tracking file on B2 bucket
+        # Update metadata.json tracking file on B2 bucket
         metadata_key = "metadata.json"
         metadata_list = []
 
@@ -125,7 +126,9 @@ def crowdsource():
         metadata_list.append({
             "timestamp": timestamp,
             "file_path": b2_filename,
-            "label": label
+            "label": label,
+            "description": description,
+            "treatment": treatment
         })
 
         # Upload updated metadata list back to B2
