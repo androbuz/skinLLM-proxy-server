@@ -1,7 +1,8 @@
 import os
 import json
 import time
-from flask import Flask, request, jsonify
+import tempfile
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from gradio_client import Client
 import boto3
@@ -22,6 +23,11 @@ B2_APPLICATION_KEY = os.environ.get("B2_APPLICATION_KEY")
 # Static Backblaze B2 details directly inside the code
 B2_BUCKET_NAME = "Derma-ai"
 B2_ENDPOINT_URL = "https://s3.eu-central-003.backblazeb2.com"
+B2_REGION = "eu-central-003"
+B2_APK_KEY = "downloads/app.apk"
+
+# Local cache path for the APK file
+LOCAL_APK_PATH = os.path.join(tempfile.gettempdir(), "skinllm_app_cached.apk")
 
 # Initialize Gradio client if HF credentials are provided
 client = None
@@ -38,6 +44,14 @@ if B2_KEY_ID and B2_APPLICATION_KEY:
         aws_secret_access_key=B2_APPLICATION_KEY,
         config=Config(signature_version='s3v4')
     )
+
+def download_apk_from_b2():
+    '''Helper function to download the latest APK from B2 to the local cache.'''
+    if not s3_client:
+        raise Exception("B2 S3 Client is not initialized.")
+    print("Downloading APK from B2 to cache...")
+    s3_client.download_file(B2_BUCKET_NAME, B2_APK_KEY, LOCAL_APK_PATH)
+    print("APK cached successfully.")
 
 @app.route("/health", methods=["GET"])
 def health():
@@ -65,89 +79,20 @@ def predict():
         if isinstance(result, (tuple, list)):
             result = result[0]
 
-        result = clean_response(str(result))
-        return jsonify({"success": True, "result": result})
-    except Exception as e:
-        print(f"Prediction error: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route("/crowdsource", methods=["POST"])
-def crowdsource():
-    # Intercepts visual image file upload
-    # Saves to B2 bucket in 'images/'
-    # Appends/registers label metadata inside B2
-    if not s3_client:
-        return jsonify({
-            "success": False,
-            "error": "Backblaze B2 storage is not configured on the proxy server."
-        }), 500
-
-    try:
-        if 'file' not in request.files:
-            return jsonify({"success": False, "error": "No file part in request"}), 400
-
-        file = request.files['file']
-        label = request.form.get('label', 'unlabeled').strip()
-        description = request.form.get('description', 'undescribed').strip()
-        treatment = request.form.get('treatment', 'untreated').strip()
-
-        if file.filename == '':
-            return jsonify({"success": False, "error": "No selected file"}), 400
-
-        # Standardize filenames safely
-        timestamp = int(time.time())
-        safe_file_name = secure_filename(file.filename)
-        b2_filename = f"images/{timestamp}_{safe_file_name}"
-
-        # Upload the image directly to B2
-        file_stream = file.stream
-        s3_client.upload_fileobj(
-            file_stream,
-            B2_BUCKET_NAME,
-            b2_filename,
-            ExtraArgs={'ContentType': file.content_type or 'image/jpeg'}
-        )
-
-        # Update metadata.json tracking file on B2 bucket
-        metadata_key = "metadata.json"
-        metadata_list = []
-
-        # Try retrieving current metadata list if exists
-        try:
-            existing_meta_obj = s3_client.get_object(Bucket=B2_BUCKET_NAME, Key=metadata_key)
-            metadata_list = json.loads(existing_meta_obj['Body'].read().decode('utf-8'))
-        except s3_client.exceptions.NoSuchKey:
-            # File doesn't exist yet, start fresh
-            metadata_list = []
-        except Exception as e:
-            print(f"Warning retrieving metadata file: {e}")
-
-        # Append current submission record
-        metadata_list.append({
-            "timestamp": timestamp,
-            "file_path": b2_filename,
-            "label": label,
-            "description": description,
-            "treatment": treatment
-        })
-
-        # Upload updated metadata list back to B2
-        s3_client.put_object(
-            Bucket=B2_BUCKET_NAME,
-            Key=metadata_key,
-            Body=json.dumps(metadata_list, indent=4),
-            ContentType='application/json'
-        )
+        if isinstance(result, str):
+            result = clean_response(result)
 
         return jsonify({
             "success": True,
-            "message": "Image and metadata successfully crowdsourced to Backblaze B2!",
-            "file_path": b2_filename
+            "result": result
         })
 
     except Exception as e:
-        print(f"Crowdsource upload error: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
+        print(f"Prediction error: {e}")
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
 
 def clean_response(text):
     text = text.strip()
@@ -164,8 +109,6 @@ def clean_response(text):
     for block in banned_blocks:
         text = text.replace(block, "")
     return text.strip()
-
-
 
 @app.route("/predict_visual", methods=["POST"])
 def predict_visual():
@@ -186,7 +129,7 @@ def predict_visual():
         data = {
             'description': description
         }
-        
+
         headers = {}
         if HF_TOKEN:
             headers["Authorization"] = f"Bearer {HF_TOKEN}"
@@ -200,7 +143,7 @@ def predict_visual():
             return jsonify(response.json())
         else:
             return jsonify({
-                "success": False, 
+                "success": False,
                 "error": f"HF Space returned status code {response.status_code}",
                 "details": response.text
             }), response.status_code
@@ -208,6 +151,41 @@ def predict_visual():
     except Exception as e:
         print(f"Visual prediction error: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
+
+# download cached apk route
+@app.route("/download", methods=["GET"])
+def download():
+    try:
+        # If not cached yet, download it once
+        if not os.path.exists(LOCAL_APK_PATH):
+            download_apk_from_b2()
+
+        return send_file(
+            LOCAL_APK_PATH,
+            mimetype="application/vnd.android.package-archive",
+            as_attachment=True,
+            download_name="app.apk"
+        )
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": f"Failed to serve APK: {str(e)}"
+        }), 500
+
+# endpoint to trigger a fresh download/reload of the APK
+@app.route("/reload-apk", methods=["GET", "POST"])
+def reload_apk():
+    try:
+        download_apk_from_b2()
+        return jsonify({
+            "success": True,
+            "message": "APK cache successfully updated from B2."
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": f"Failed to update cache: {str(e)}"
+        }), 500
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
